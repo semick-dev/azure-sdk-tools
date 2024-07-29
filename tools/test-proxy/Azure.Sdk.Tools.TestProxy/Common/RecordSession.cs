@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
 using System;
@@ -101,6 +101,18 @@ namespace Azure.Sdk.Tools.TestProxy.Common
 
                 return entry;
             }
+        }
+
+        public void Sanitize(IEnumerable<RecordedTestSanitizer> sanitizers)
+        {
+            lock(Entries)
+            {
+                foreach(RecordedTestSanitizer sanitizer in sanitizers)
+                {
+                    sanitizer.Sanitize(this);
+                }
+            }
+
         }
 
         public void Sanitize(RecordedTestSanitizer sanitizer)
