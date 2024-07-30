@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Unicode;
+using System.Threading;
 
 namespace Azure.Sdk.Tools.TestProxy.Common
 {
@@ -31,6 +32,16 @@ namespace Azure.Sdk.Tools.TestProxy.Common
         public bool IsTrack1Recording { get; set; }
 
         public RequestMethod RequestMethod { get; set; }
+
+        private int _removed;
+
+        public bool Removed
+        {
+            get => Interlocked.CompareExchange(ref _removed, 0, 0) == 1;
+            set => Interlocked.Exchange(ref _removed, value ? 1 : 0);
+        }
+
+        public int EntryIndex;
 
         public int StatusCode { get; set; }
 

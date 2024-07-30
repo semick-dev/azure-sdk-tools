@@ -131,6 +131,7 @@ namespace Azure.Sdk.Tools.TestProxy.Common
 
         public virtual void Sanitize(RecordSession session)
         {
+
             foreach (RecordEntry entry in session.Entries)
             {
                 Sanitize(entry);

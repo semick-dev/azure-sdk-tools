@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -12,8 +13,10 @@ namespace Azure.Sdk.Tools.TestProxy.Common
     public class RecordSession
     {
         internal const string DateTimeOffsetNowVariableKey = "DateTimeOffsetNow";
+        public int EntryCount;
 
         public List<RecordEntry> Entries { get; } = new List<RecordEntry>();
+        ConcurrentDictionary<int, RecordEntry> ConcurrentEntries { get; } = new ConcurrentDictionary<int, RecordEntry>();
 
         public SortedDictionary<string, string> Variables { get; } = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -24,10 +27,17 @@ namespace Azure.Sdk.Tools.TestProxy.Common
         {
             jsonWriter.WriteStartObject();
             jsonWriter.WriteStartArray(nameof(Entries));
-            foreach (RecordEntry record in Entries)
+
+            foreach(var key in ConcurrentEntries.Keys)
             {
+                ConcurrentEntries.TryGetValue(key, out var record);
                 record.Serialize(jsonWriter);
+
             }
+            //foreach (RecordEntry record in Entries)
+            //{
+            //    record.Serialize(jsonWriter);
+            //}
             jsonWriter.WriteEndArray();
 
             jsonWriter.WriteStartObject(nameof(Variables));
@@ -45,9 +55,15 @@ namespace Azure.Sdk.Tools.TestProxy.Common
             var session = new RecordSession();
             if (element.TryGetProperty(nameof(Entries), out JsonElement property))
             {
+                int i = 0;
                 foreach (JsonElement item in property.EnumerateArray())
                 {
                     session.Entries.Add(RecordEntry.Deserialize(item));
+
+                    var forAddition = RecordEntry.Deserialize(item);
+                    forAddition.EntryIndex = i;
+                    session.ConcurrentEntries.TryAdd(i, forAddition);
+                    i++;
                 }
             }
 
@@ -80,6 +96,11 @@ namespace Azure.Sdk.Tools.TestProxy.Common
             {
                 Entries.Add(entry);
             }
+            entry.EntryIndex = ConcurrentEntries.Keys.Min() + 1;
+
+            if(!ConcurrentEntries.TryAdd(entry.EntryIndex, entry)){
+                DebugLogger.LogError($"Unable to add an entry of uri {entry.RequestUri} at index {entry.EntryIndex}");
+            }
         }
 
         public RecordEntry Lookup(RecordEntry requestEntry, RecordMatcher matcher, IEnumerable<RecordedTestSanitizer> sanitizers, bool remove = true)
@@ -88,43 +109,57 @@ namespace Azure.Sdk.Tools.TestProxy.Common
             {
                 sanitizer.Sanitize(requestEntry);
             }
+
+
             // normalize request body with STJ using relaxed escaping to match behavior when Deserializing from session files
             RecordEntry.NormalizeJsonBody(requestEntry.Request);
 
-            lock (Entries)
+            RecordEntry entry = matcher.FindMatch(requestEntry, ConcurrentEntries);
+            if (remove)
             {
-                RecordEntry entry = matcher.FindMatch(requestEntry, Entries);
-                if (remove)
-                {
-                    Entries.Remove(entry);
-                }
-
-                return entry;
+                entry.Removed = true;
             }
+
+            return entry;
         }
 
         public void Remove(RecordEntry entry)
         {
-            lock (Entries)
-            {
-                Entries.Remove(entry);
+            //lock (Entries)
+            //{
+                // Entries.Remove(entry);
+
+            if(ConcurrentEntries.TryGetValue(entry.EntryIndex, out var matchedEntry)){
+                matchedEntry.Removed = true;
             }
+            //}
         }
 
         public void Sanitize(RecordedTestSanitizer sanitizer)
         {
-            lock (Entries)
+            //lock (Entries)
+            //{
+            //    sanitizer.Sanitize(this);
+            //}
+            foreach (var key in ConcurrentEntries.Keys)
             {
-                sanitizer.Sanitize(this);
-            }
-        }
-        public void Sanitize(IEnumerable<RecordedTestSanitizer> sanitizers)
-        {
-            lock (Entries)
-            {
-                foreach(var sanitizer in sanitizers)
+                if (ConcurrentEntries.TryGetValue(key, out var entry) && !entry.Removed)
                 {
                     sanitizer.Sanitize(this);
+                }
+            }
+        }
+
+        public void Sanitize(IEnumerable<RecordedTestSanitizer> sanitizers)
+        {
+            foreach(var sanitizer in sanitizers)
+            {
+                foreach (var key in ConcurrentEntries.Keys)
+                {
+                    if (ConcurrentEntries.TryGetValue(key, out var entry) && !entry.Removed)
+                    {
+                        sanitizer.Sanitize(this);
+                    }
                 }
             }
         }
